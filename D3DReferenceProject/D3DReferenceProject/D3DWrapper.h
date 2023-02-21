@@ -18,6 +18,17 @@ static class D3DWrapper
 	static D3DHandle CreatePixelShader(const char* path);
 	static D3DHandle CreateComputeShader(const char* path);
 
+	static void SubmitDraw(D3DHandle* draw_textures, RESRC_VIEWS* textureBindings, uint32_t numTextures,
+						   D3DHandle* draw_buffers, RESRC_VIEWS* bufferBindings, uint32_t numBuffers,
+						   D3DHandle* draw_volumes, RESRC_VIEWS* volumeBindings, uint32_t numVolumes,
+						   D3DHandle VS, D3DHandle PS, bool directToBackbuf, bool is2D, D3DHandle vbuffer, D3DHandle ibuffer, uint32_t numNdces);
+
+	static void SubmitDispatch(D3DHandle* textures, RESRC_VIEWS* textureBindings, uint32_t numTextures,
+							   D3DHandle* buffers, RESRC_VIEWS* bufferBindings, uint32_t numBuffers,
+							   D3DHandle* volumes, RESRC_VIEWS* volumeBindings, uint32_t numVolumes,
+							   D3DHandle CS, uint32_t dispatchX, uint32_t dispatchY, uint32_t dispatchZ);
+
+	static void PrepareBackbuf();
 	static void Present();
 };
 

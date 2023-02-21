@@ -50,8 +50,18 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // Initialize API wrapper
     D3DWrapper::Init(windowHandle, windowWidth, windowHeight, false);
 
+    // Initialize scenes (just one for now, we don't need more abstraction yet)
+    Scene scene; // One room and one model in our starter scene
+
+    // Load Morgan McGuire's version of the Stanford Bunny
+    scene.AddModel("test_cube.obj");
+    //scene.AddModel("stage_mesh.obj");
+    // ...
+
+    scene.BakeModels(true);
+
     // Initialize rendering pipeline
-    Pipeline::Init();
+    Pipeline::Init(&scene, 1);
 
     // Main message loop:
     while (GetMessage(&msg, nullptr, 0, 0))

@@ -48,6 +48,9 @@
     <ClInclude Include="Memory.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\ThirdParty\tinyobjloader\tiny_obj_loader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="D3DReferenceProject.cpp">

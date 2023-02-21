@@ -1,4 +1,5 @@
 #include "D3DWrapper.h"
+#include "Memory.h"
 #include <cassert>
 #include <wrl/client.h>
 
@@ -64,14 +65,14 @@ ComPtr<ID3D11InputLayout> ilayout2D;
 // We aren't using multiple vertex slots, and we aren't using API instancing, so we can ignore those fields here
 D3D11_INPUT_ELEMENT_DESC vertex_inputs[3] =
 {
-  { "SV_POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-  { "SV_TEXCOORD", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-  { "SV_TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+  { "POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+  { "TEXCOORD", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+  { "TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 }
 };
 
 D3D11_INPUT_ELEMENT_DESC vertex_inputs_2D[3] =
 {
-  { "SV_POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+  { "POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 };
 
 bool using_vsync = false;
@@ -415,7 +416,7 @@ D3DHandle D3DWrapper::CreateVolume(uint32_t width, uint32_t height, uint32_t dep
 		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
 		uavDesc.Texture2D.MipSlice = 0; // Mipmap index for this view - we don't have mips at the moment, so this is always zero
 		uavDesc.Format = format;
-		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE3D;
 		hr = device->CreateUnorderedAccessView(volume.resrc.Get(), &uavDesc, volume.uav.ReleaseAndGetAddressOf());
 		assert(SUCCEEDED(hr));
 	}
@@ -426,7 +427,7 @@ D3DHandle D3DWrapper::CreateVolume(uint32_t width, uint32_t height, uint32_t dep
 		srvDesc.Texture2D.MipLevels = 1;
 		srvDesc.Texture2D.MostDetailedMip = 0; // Another index - again, we don't have mips, so keep this at zero
 		srvDesc.Format = format;
-		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE3D;
 		hr = device->CreateShaderResourceView(volume.resrc.Get(), &srvDesc, volume.srv.ReleaseAndGetAddressOf());
 		assert(SUCCEEDED(hr));
 	}
@@ -556,11 +557,95 @@ D3DHandle D3DWrapper::CreateComputeShader(const char* path)
 	return handle;
 }
 
-void D3DWrapper::Present()
+void BindResources(D3DHandle* resources, RESRC_VIEWS* resrcBindings, uint32_t numResources, RESOURCE_TYPES resrcType)
 {
+	bool* resource_bound = Memory::AllocateArray<bool>(numResources);
+	for (uint32_t i = 0; i < numResources; i++)
+	{
+		if (!resource_bound[i])
+		{
+			// Scan all views equal to [resrcBindings[i]] into a local buffer and bind together for fewer state changes; flag the selected textures/bindings
+
+			D3DHandle* matchingResources = Memory::AllocateArray<D3DHandle>(numResources - i);
+			uint32_t matchCtr = 0;
+
+			for (uint32_t k = i; k < numResources; k++)
+			{
+				if (resrcBindings[k] == resrcBindings[i])
+				{
+					matchingResources[matchCtr] = resources[k];
+					resource_bound[k] = true;
+					matchCtr++;
+				}
+			}
+
+			// Choose an appropriate binding for the current view type & requested shader stage
+			// (could fill this in now but spent enough time already, and I'd immediately think of smoething else afterward ^_^')
+			switch (resrcBindings[i])
+			{
+
+			}
+
+			// Free memory laon
+			Memory::FreeToAddress(matchingResources);
+		}
+	}
+	Memory::FreeToAddress(resource_bound);
+}
+
+void D3DWrapper::SubmitDraw(D3DHandle* draw_textures, RESRC_VIEWS* textureBindings, uint32_t numTextures,
+						    D3DHandle* draw_buffers, RESRC_VIEWS* bufferBindings, uint32_t numBuffers,
+						    D3DHandle* draw_volumes, RESRC_VIEWS* volumeBindings, uint32_t numVolumes,
+							D3DHandle VS, D3DHandle PS, bool directToBackbuf, bool is2D, D3DHandle vbuffer, D3DHandle ibuffer, uint32_t numNdces)
+{
+#ifdef _DEBUG
+	for (uint32_t i = 0; i < numTextures; i++)
+	{
+		assert(("Direct write to back-buffer expected, but render-target view provided to D3DWrapper::SubmitDraw", !(directToBackbuf && textureBindings[i] == RENDER_TARGET)));
+	}
+#endif
+
+	BindResources(draw_textures, textureBindings, numTextures, RESOURCE_TYPES::TEXTURE);
+	BindResources(draw_buffers, bufferBindings, numBuffers, RESOURCE_TYPES::BUFFER);
+	BindResources(draw_volumes, volumeBindings, numVolumes, RESOURCE_TYPES::VOLUME);
+
+	if (directToBackbuf)
+	{
+		context->OMSetRenderTargets(1, backBufView.GetAddressOf(), textures[starterDepthBuffer.index].dsv.Get());
+	}
+
+	uint32_t vbufStride = is2D ? sizeof(Vertex2D) : sizeof(Vertex3D);
+	context->IASetVertexBuffers(0, 1, buffers[vbuffer.index].resrc.GetAddressOf(), &vbufStride, 0);
+	context->IASetIndexBuffer(buffers[ibuffer.index].resrc.Get(), DXGI_FORMAT_R32_UINT, 0);
+
+	context->VSSetShader(vtShaders[VS.index].Get(), nullptr, 0);
+	context->PSSetShader(pxShaders[PS.index].Get(), nullptr, 0);
+	context->DrawIndexed(numNdces, 0, 0);
+}
+
+void D3DWrapper::SubmitDispatch(D3DHandle* dispatch_textures, RESRC_VIEWS* textureBindings, uint32_t numTextures,
+								D3DHandle* dispatch_buffers, RESRC_VIEWS* bufferBindings, uint32_t numBuffers,
+								D3DHandle* dispatch_volumes, RESRC_VIEWS* volumeBindings, uint32_t numVolumes,
+								D3DHandle CS, uint32_t dispatchX, uint32_t dispatchY, uint32_t dispatchZ)
+{
+	BindResources(dispatch_textures, textureBindings, numTextures, RESOURCE_TYPES::TEXTURE);
+	BindResources(dispatch_buffers, bufferBindings, numBuffers, RESOURCE_TYPES::BUFFER);
+	BindResources(dispatch_volumes, volumeBindings, numVolumes, RESOURCE_TYPES::VOLUME);
+
+	context->CSSetShader(computeShaders[CS.index].Get(), nullptr, 0);
+	context->Dispatch(dispatchX, dispatchY, dispatchZ);
+}
+
+void D3DWrapper::PrepareBackbuf()
+{
+	// Clear the back-buffer & depth-buffer
 	const FLOAT debug_red[4] = { 1, 0, 0, 1 };
 	context->ClearRenderTargetView(backBufView.Get(), debug_red);
-	context->OMSetRenderTargets(1, backBufView.GetAddressOf(), textures[starterDepthBuffer.index].dsv.Get());
+	context->ClearDepthStencilView(textures[starterDepthBuffer.index].dsv.Get(), 0, 0, 0);
+}
+
+void D3DWrapper::Present()
+{
 	swapchain->Present(using_vsync ? 4 : 0, // If vsync, try to synchronize for at least 4 frames (I suspect d3d11.1-3 have cleaner interfaces than this but api upgrade scary)
 					   using_vsync ? 0 : DXGI_PRESENT_ALLOW_TEARING); // Allow tearing if no vsync
 }

@@ -92,10 +92,6 @@ struct D3DResource
 		{
 			assert(desc.fmt == DXGI_FORMAT_UNKNOWN);
 		}
-		else if (desc.presentable)
-		{
-			assert(desc.fmt == D3DWrapper::GetSwapchainFormat());
-		}
 		else if (isIndex)
 		{
 			assert(desc.fmt == DXGI_FORMAT_R16_UINT || desc.fmt == DXGI_FORMAT_R32_UINT);

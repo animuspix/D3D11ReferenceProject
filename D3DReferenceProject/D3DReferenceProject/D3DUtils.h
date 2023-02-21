@@ -46,12 +46,8 @@ enum RESRC_VIEWS // Multiple supported, since multiple may be used in practice w
 	// overlap)
 
 	VIEWS_UNSPECIFIED = 1 << 7, // Staging resources cannot be boumd, so cannot have any views specified
+	NUM_VIEWS = 7
 };
-
-//uint32_t operator&(RESRC_VIEWS a, RESRC_VIEWS b)
-//{
-//	return static_cast<uint32_t>(a) & static_cast<uint32_t>(b);
-//}
 
 enum class D3D_OBJ_TYPES
 {
@@ -78,6 +74,37 @@ struct Vertex3D
 
 	// Vertices are aligned to 16-byte boundaries!
 	// Thus better to reserve spare data and maybe use them later than have the space mysteriously filled in by the driver at runtime
+
+private:
+	bool EpsEquality(float x, float y, float eps) // Larger epsilon can allow for vertex deduplication, but we want to do that separately to indexing
+	{
+		return fabs(x - y) < eps;
+	}
+
+	bool VectorCompare(DirectX::XMFLOAT4 a, DirectX::XMFLOAT4 b, float eps)
+	{
+		return EpsEquality(a.x, b.x, eps) && EpsEquality(a.y, b.y, eps) &&
+			   EpsEquality(a.z, b.z, eps) && EpsEquality(a.w, b.w, eps);
+	}
+
+public:
+
+	bool mergeable(const Vertex3D& other, float maxAttribDiff)
+	{
+		bool posEqual = VectorCompare(pos, other.pos, maxAttribDiff);
+		bool matEqual = VectorCompare(mat, other.mat, maxAttribDiff);
+		bool normalsEqual = VectorCompare(normals, other.normals, maxAttribDiff);
+		return posEqual && matEqual && normalsEqual;
+	}
+
+	bool operator==(const Vertex3D& rhs)
+	{
+		constexpr float equality_eps = 0.00001f;
+		bool posEqual = VectorCompare(pos, rhs.pos, equality_eps);
+		bool matEqual = VectorCompare(mat, rhs.mat, equality_eps);
+		bool normalsEqual = VectorCompare(normals, rhs.normals, equality_eps);
+		return posEqual && matEqual && normalsEqual;
+	}
 };
 
 struct Vertex2D
@@ -89,6 +116,14 @@ struct SQT_Transform
 {
 	DirectX::XMFLOAT4 q; // sin(theta) * axis, cos*theta)
 	DirectX::XMFLOAT4 ts; // scale in w, translation in XYZ
+};
+
+enum MATERIAL_TYPES
+{
+	DIFFUSE, // Lambert
+	DIFFUSE_PBR, // Oren-Nayar
+	SPECULAR_SHINY, // Needs GI to implement cleanly
+	SPECULAR_TRANSLUCENT // Needs GI to implement
 };
 
 // DirectX::XMMATRIX SQT_to_Matrix()
