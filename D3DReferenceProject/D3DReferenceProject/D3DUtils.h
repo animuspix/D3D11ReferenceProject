@@ -59,6 +59,13 @@ enum class D3D_OBJ_TYPES
 	PIXEL_SHADER
 };
 
+enum class SHADER_TYPES
+{
+	VS,
+	PS,
+	CS
+};
+
 struct D3DHandle
 {
 
@@ -88,14 +95,6 @@ private:
 	}
 
 public:
-
-	bool mergeable(const Vertex3D& other, float maxAttribDiff)
-	{
-		bool posEqual = VectorCompare(pos, other.pos, maxAttribDiff);
-		bool matEqual = VectorCompare(mat, other.mat, maxAttribDiff);
-		bool normalsEqual = VectorCompare(normals, other.normals, maxAttribDiff);
-		return posEqual && matEqual && normalsEqual;
-	}
 
 	bool operator==(const Vertex3D& rhs)
 	{

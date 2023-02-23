@@ -460,13 +460,6 @@ void D3DWrapper::ClearResrc(D3DHandle handle)
 bool resolved3DInputs = false;
 bool resolved2DInputs = false;
 
-enum class SHADER_TYPES
-{
-	VS,
-	PS,
-	CS
-};
-
 struct ShaderBuilder
 {
 	uint8_t* data = nullptr;
@@ -557,7 +550,61 @@ D3DHandle D3DWrapper::CreateComputeShader(const char* path)
 	return handle;
 }
 
-void BindResources(D3DHandle* resources, RESRC_VIEWS* resrcBindings, uint32_t numResources, RESOURCE_TYPES resrcType)
+void SearchForResources(uint32_t start, D3DHandle* resources, RESRC_VIEWS* resrcBindings, SHADER_TYPES* bindFor, uint32_t numResources, RESRC_VIEWS viewSearching,
+						D3DHandle*& out_matchingResources, bool*& out_bindState, uint32_t& out_matchCtr)
+{
+	uint32_t matchCtr = 0;
+	for (uint32_t k = start; k < numResources; k++)
+	{
+		if (resrcBindings[k] == viewSearching && bindFor[k] == bindFor[start])
+		{
+			out_matchingResources[matchCtr] = resources[k];
+			out_bindState[k] = true;
+			matchCtr++;
+		}
+	}
+	out_matchCtr = matchCtr;
+}
+
+template<typename viewType>
+struct BindableViewList
+{
+	viewType** views = nullptr;
+	BindableViewList(uint32_t numViews, D3DHandle* handles)
+	{
+		views = Memory::AllocateArray<viewType*>(numViews);
+		for (uint32_t k = 0; k < numViews; k++)
+		{
+			if (std::is_same_v<viewType, ID3D11UnorderedAccessView>)
+			{
+				views[k] = textures[handles[k]].uav.Get();
+			}
+			else if (std::is_same_v<viewType, ID3D11ShaderResourceView>)
+			{
+				views[k] = textures[handles[k]].srv.Get();
+			}
+			else if (std::is_same_v<viewType, ID3D11RenderTargetView>)
+			{
+				views[k] = textures[handles[k]].rtv.Get();
+			}
+			else if (std::is_same_v<viewType, ID3D11DepthStencilView>)
+			{
+				views[k] = textures[handles[k]].dsv.Get();
+			}
+			else // if (std::is_same_v<viewType, ID3D11Buffer>)
+			{
+				views[k] = buffers[handles[k]].resrc.Get();
+			}
+		}
+	}
+
+	~BindableViewList()
+	{
+		Memory::FreeToAddress(views);
+	}
+};
+
+void BindResources(D3DHandle* resources, RESRC_VIEWS* resrcBindings, SHADER_TYPES* bindFor, uint32_t numResources)
 {
 	bool* resource_bound = Memory::AllocateArray<bool>(numResources);
 	for (uint32_t i = 0; i < numResources; i++)
@@ -569,21 +616,116 @@ void BindResources(D3DHandle* resources, RESRC_VIEWS* resrcBindings, uint32_t nu
 			D3DHandle* matchingResources = Memory::AllocateArray<D3DHandle>(numResources - i);
 			uint32_t matchCtr = 0;
 
-			for (uint32_t k = i; k < numResources; k++)
-			{
-				if (resrcBindings[k] == resrcBindings[i])
-				{
-					matchingResources[matchCtr] = resources[k];
-					resource_bound[k] = true;
-					matchCtr++;
-				}
-			}
+			SearchForResources(i, resources, resrcBindings, bindFor, numResources, resrcBindings[i], matchingResources, resource_bound, matchCtr);
 
 			// Choose an appropriate binding for the current view type & requested shader stage
 			// (could fill this in now but spent enough time already, and I'd immediately think of smoething else afterward ^_^')
 			switch (resrcBindings[i])
 			{
+				SHADER_TYPES stage = bindFor[i];
+				case UNORDERED_GPU_WRITES:
+					if (stage == SHADER_TYPES::VS || stage == SHADER_TYPES::PS)
+					{
+						assert(("FL11.0 only supports UAVs in compute shaders", false));
+					}
+					else
+					{
+						BindableViewList<ID3D11UnorderedAccessView> bindings(matchCtr, matchingResources);
+						context->CSSetUnorderedAccessViews(0, matchCtr, bindings.views->GetAddressOf(), nullptr);
+					}
+					break;
 
+				case GENERIC_READONLY:
+					if (stage == SHADER_TYPES::VS)
+					{
+						BindableViewList<ID3D11ShaderResourceView> bindings(matchCtr, matchingResources);
+						context->VSSetShaderResources(0, matchCtr, bindings.views);
+					}
+					else if (stage == SHADER_TYPES::PS)
+					{
+						BindableViewList<ID3D11ShaderResourceView> bindings(matchCtr, matchingResources);
+						context->PSSetShaderResources(0, matchCtr, bindings.views);
+					}
+					else // if (stage == SHADER_TYPES::CS)
+					{
+						BindableViewList<ID3D11ShaderResourceView> bindings(matchCtr, matchingResources);
+						context->CSSetShaderResources(0, matchCtr, bindings.views);
+					}
+					break;
+
+				case CONSTANT_BUFFER:
+					if (stage == SHADER_TYPES::VS)
+					{
+						BindableViewList<ID3D11Buffer> bindings(matchCtr, matchingResources);
+						context->VSSetConstantBuffers(0, matchCtr, bindings.views);
+					}
+					else if (stage == SHADER_TYPES::PS)
+					{
+						BindableViewList<ID3D11Buffer> bindings(matchCtr, matchingResources);
+						context->PSSetConstantBuffers(0, matchCtr, bindings.views);
+					}
+					else // if (stage == SHADER_TYPES::CS)
+					{
+						BindableViewList<ID3D11Buffer> bindings(matchCtr, matchingResources);
+						context->CSSetConstantBuffers(0, matchCtr, bindings.views);
+					}
+					break;
+
+				case RENDER_TARGET:
+				case DEPTH_STENCIL:
+					if (resrcBindings[i] == RENDER_TARGET)
+					{
+						assert(("Render-targets can't be boound for compute shader dispatch - prefer a UAV (GPU_UNORDERED_WRITES)", stage != SHADER_TYPES::CS));
+
+						// Resolve RTV bindlist
+						BindableViewList<ID3D11RenderTargetView> rtvBindings(matchCtr, matchingResources);
+
+						uint32_t numDepthBuffers = 0;
+						D3DHandle* depthResources = Memory::AllocateArray<D3DHandle>(numResources - i);
+						SearchForResources(i, resources, resrcBindings, bindFor, numResources, DEPTH_STENCIL, depthResources, resource_bound, numDepthBuffers);
+
+						if (numDepthBuffers > 0)
+						{
+							assert(("Only one depth buffer can be bound for each draw", false));
+							context->OMSetRenderTargets(matchCtr, rtvBindings.views, textures[depthResources[0].index].dsv.Get());
+						}
+						else
+						{
+							context->OMSetRenderTargets(matchCtr, rtvBindings.views, nullptr);
+						}
+
+						Memory::FreeToAddress(depthResources);
+					}
+					else
+					{
+						assert(("Depth-stencils can't be boound for compute shader dispatch - prefer a UAV (GPU_UNORDERED_WRITES)", stage != SHADER_TYPES::CS));
+
+						// Resolve DSV bindlist
+						BindableViewList<ID3D11DepthStencilView> depthBindings(matchCtr, matchingResources);
+
+						uint32_t numRTVs = 0;
+						D3DHandle* rtvResources = Memory::AllocateArray<D3DHandle>(numResources - i);
+						SearchForResources(i, resources, resrcBindings, bindFor, numResources, RENDER_TARGET, rtvResources, resource_bound, numRTVs);
+
+						BindableViewList<ID3D11RenderTargetView> rtvBindings(numRTVs, rtvResources);
+
+						if (numRTVs > 0)
+						{
+							assert(("Only one depth buffer can be bound for each draw", false));
+							context->OMSetRenderTargets(matchCtr, rtvBindings.views, depthBindings.views[0]);
+						}
+						else
+						{
+							context->OMSetRenderTargets(matchCtr, nullptr, depthBindings.views[0]);
+						}
+
+						Memory::FreeToAddress(rtvResources);
+					}
+					break;
+
+				default:
+					assert(("Invalid/unsupported resource binding", false));
+					break;
 			}
 
 			// Free memory laon
@@ -593,9 +735,9 @@ void BindResources(D3DHandle* resources, RESRC_VIEWS* resrcBindings, uint32_t nu
 	Memory::FreeToAddress(resource_bound);
 }
 
-void D3DWrapper::SubmitDraw(D3DHandle* draw_textures, RESRC_VIEWS* textureBindings, uint32_t numTextures,
-						    D3DHandle* draw_buffers, RESRC_VIEWS* bufferBindings, uint32_t numBuffers,
-						    D3DHandle* draw_volumes, RESRC_VIEWS* volumeBindings, uint32_t numVolumes,
+void D3DWrapper::SubmitDraw(D3DHandle* draw_textures, RESRC_VIEWS* textureBindings, SHADER_TYPES* bindTexturesFor, uint32_t numTextures,
+							D3DHandle* draw_buffers, RESRC_VIEWS* bufferBindings, SHADER_TYPES* bindBuffersFor, uint32_t numBuffers,
+							D3DHandle* draw_volumes, RESRC_VIEWS* volumeBindings, SHADER_TYPES* bindVolumesFor, uint32_t numVolumes,
 							D3DHandle VS, D3DHandle PS, bool directToBackbuf, bool is2D, D3DHandle vbuffer, D3DHandle ibuffer, uint32_t numNdces)
 {
 #ifdef _DEBUG
@@ -605,9 +747,7 @@ void D3DWrapper::SubmitDraw(D3DHandle* draw_textures, RESRC_VIEWS* textureBindin
 	}
 #endif
 
-	BindResources(draw_textures, textureBindings, numTextures, RESOURCE_TYPES::TEXTURE);
-	BindResources(draw_buffers, bufferBindings, numBuffers, RESOURCE_TYPES::BUFFER);
-	BindResources(draw_volumes, volumeBindings, numVolumes, RESOURCE_TYPES::VOLUME);
+	BindResources(draw_textures, textureBindings, bindTexturesFor, numTextures);
 
 	if (directToBackbuf)
 	{
@@ -628,9 +768,8 @@ void D3DWrapper::SubmitDispatch(D3DHandle* dispatch_textures, RESRC_VIEWS* textu
 								D3DHandle* dispatch_volumes, RESRC_VIEWS* volumeBindings, uint32_t numVolumes,
 								D3DHandle CS, uint32_t dispatchX, uint32_t dispatchY, uint32_t dispatchZ)
 {
-	BindResources(dispatch_textures, textureBindings, numTextures, RESOURCE_TYPES::TEXTURE);
-	BindResources(dispatch_buffers, bufferBindings, numBuffers, RESOURCE_TYPES::BUFFER);
-	BindResources(dispatch_volumes, volumeBindings, numVolumes, RESOURCE_TYPES::VOLUME);
+	SHADER_TYPES shaderType = SHADER_TYPES::CS;
+	BindResources(dispatch_textures, textureBindings, &shaderType, numTextures);
 
 	context->CSSetShader(computeShaders[CS.index].Get(), nullptr, 0);
 	context->Dispatch(dispatchX, dispatchY, dispatchZ);

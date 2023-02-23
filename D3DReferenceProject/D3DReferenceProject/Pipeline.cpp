@@ -12,38 +12,51 @@ struct ShadingJob
 {
 	static constexpr uint32_t maxBindingsAnyType = 16;
 
-	void AddTexture(D3DHandle resrc, RESRC_VIEWS bindAs)
+	void AddTexture(D3DHandle resrc, RESRC_VIEWS bindAs, SHADER_TYPES bindFor)
 	{
+		if ((bindAs & DEPTH_STENCIL) && hasDepthStencil)
+		{
+			assert(("No more than one depth-stencil buffer in each draw", false));
+		}
+
+		bindTexturesFor[numTextures] = bindFor;
 		textureBindings[numTextures] = bindAs;
 		textures[numTextures] = resrc;
 		numTextures++;
 	}
 
-	void AddBuffer(D3DHandle resrc, RESRC_VIEWS bindAs)
+	void AddBuffer(D3DHandle resrc, RESRC_VIEWS bindAs, SHADER_TYPES bindFor)
 	{
-		bufferBindings[numTextures] = bindAs;
+		bindBufferFor[numBuffers] = bindFor;
+		bufferBindings[numBuffers] = bindAs;
 		buffers[numBuffers] = resrc;
 		numBuffers++;
 	}
 
-	void AddVolume(D3DHandle resrc, RESRC_VIEWS bindAs)
+	void AddVolume(D3DHandle resrc, RESRC_VIEWS bindAs, SHADER_TYPES bindFor)
 	{
-		volumeBindings[numTextures] = bindAs;
-		textures[numTextures] = resrc;
+		bindVolumeFor[numVolumes] = bindFor;
+		volumeBindings[numVolumes] = bindAs;
+		volumes[numVolumes] = resrc;
 		numVolumes++;
 	}
 
+	SHADER_TYPES bindTexturesFor[maxBindingsAnyType];
 	RESRC_VIEWS textureBindings[maxBindingsAnyType];
 	D3DHandle textures[maxBindingsAnyType];
 	uint32_t numTextures = 0;
 
+	SHADER_TYPES bindBufferFor[maxBindingsAnyType];
 	RESRC_VIEWS bufferBindings[maxBindingsAnyType];
 	D3DHandle buffers[maxBindingsAnyType];
 	uint32_t numBuffers = 0;
 
+	SHADER_TYPES bindVolumeFor[maxBindingsAnyType];
 	RESRC_VIEWS volumeBindings[maxBindingsAnyType];
 	D3DHandle volumes[maxBindingsAnyType];
 	uint32_t numVolumes = 0;
+
+	bool hasDepthStencil = false;
 };
 
 struct DrawJob : public ShadingJob
@@ -55,7 +68,9 @@ struct DrawJob : public ShadingJob
 		ps = D3DWrapper::CreatePixelShader(ps_path);
 	}
 
+	bool is2D = false;
 	bool directToBackbuf = true; // Set if this draw writes to the back-buffer instead of an intermediate RTV
+
 	D3DHandle vs;
 	D3DHandle ps;
 };
@@ -115,7 +130,6 @@ struct JobArray
 
 		typesOfJob[combinedJobCounter] = DRAW;
 		combinedJobCounter++;
-
 	}
 
 	void SubmitCompute(DispatchJob job)
@@ -126,6 +140,8 @@ struct JobArray
 
 		typesOfJob[combinedJobCounter] = DISPATCH;
 		combinedJobCounter++;
+
+		assert(("Depth-stencil buffers are unsupported for compute jobs", !job.hasDepthStencil));
 	}
 };
 
@@ -164,13 +180,15 @@ void Pipeline::PushFrame(uint32_t sceneID)
 		{
 			DrawJob job = jobs.drawJobsCompact[jobs.jobOffsets[i]];
 			D3DWrapper::SubmitDraw(job.textures, job.textureBindings, job.numTextures,
-								   job.buffers, job.bufferBindings, job.numBuffers, job.vs, job.ps, job.directToBackbuf, sceneData[i].vbuffer, sceneData[i].ibuffer, sceneData[i].numIndices);
+								   job.buffers, job.bufferBindings, job.numBuffers,
+								   job.volumes, job.volumeBindings, job.numVolumes, job.vs, job.ps, job.directToBackbuf, job.is2D, sceneData[i].vbuffer, sceneData[i].ibuffer, sceneData[i].numIndices);
 		}
 		else if (jobs.typesOfJob[i] == JobArray::DISPATCH)
 		{
 			DispatchJob job = jobs.dispatchJobsCompact[jobs.jobOffsets[i]];
-			D3DWrapper::SubmitCompute(job.textures, job.textureBindings, job.numTextures,
-									  job.buffers, job.bufferBindings, job.numBuffers, job.cs, job.dispatchX, job.dispatchY, job.dispatchZ);
+			D3DWrapper::SubmitDispatch(job.textures, job.textureBindings, job.numTextures,
+									   job.buffers, job.bufferBindings, job.numBuffers,
+									   job.volumes, job.volumeBindings, job.numVolumes, job.cs, job.dispatchX, job.dispatchY, job.dispatchZ);
 		}
 	}
 
