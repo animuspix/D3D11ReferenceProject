@@ -67,7 +67,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     while (GetMessage(&msg, nullptr, 0, 0))
     {
         // Issue GPU work
-        Pipeline::PushFrame();
+        Pipeline::PushFrame(0);
 
         if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
         {

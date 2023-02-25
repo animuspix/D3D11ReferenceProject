@@ -27,7 +27,7 @@ struct ShadingJob
 
 	void AddBuffer(D3DHandle resrc, RESRC_VIEWS bindAs, SHADER_TYPES bindFor)
 	{
-		bindBufferFor[numBuffers] = bindFor;
+		bindBuffersFor[numBuffers] = bindFor;
 		bufferBindings[numBuffers] = bindAs;
 		buffers[numBuffers] = resrc;
 		numBuffers++;
@@ -35,7 +35,7 @@ struct ShadingJob
 
 	void AddVolume(D3DHandle resrc, RESRC_VIEWS bindAs, SHADER_TYPES bindFor)
 	{
-		bindVolumeFor[numVolumes] = bindFor;
+		bindVolumesFor[numVolumes] = bindFor;
 		volumeBindings[numVolumes] = bindAs;
 		volumes[numVolumes] = resrc;
 		numVolumes++;
@@ -46,12 +46,12 @@ struct ShadingJob
 	D3DHandle textures[maxBindingsAnyType];
 	uint32_t numTextures = 0;
 
-	SHADER_TYPES bindBufferFor[maxBindingsAnyType];
+	SHADER_TYPES bindBuffersFor[maxBindingsAnyType];
 	RESRC_VIEWS bufferBindings[maxBindingsAnyType];
 	D3DHandle buffers[maxBindingsAnyType];
 	uint32_t numBuffers = 0;
 
-	SHADER_TYPES bindVolumeFor[maxBindingsAnyType];
+	SHADER_TYPES bindVolumesFor[maxBindingsAnyType];
 	RESRC_VIEWS volumeBindings[maxBindingsAnyType];
 	D3DHandle volumes[maxBindingsAnyType];
 	uint32_t numVolumes = 0;
@@ -150,7 +150,7 @@ JobArray jobs;
 void Pipeline::Init(Scene* scenes, uint8_t numScenes)
 {
 	sceneData = Memory::AllocateArray<SceneMesh>(numScenes);
-	numScenesAvailable = 0;
+	numScenesAvailable = numScenes;
 
 	for (uint32_t i = 0; i < numScenes; i++)
 	{
@@ -160,7 +160,7 @@ void Pipeline::Init(Scene* scenes, uint8_t numScenes)
 	// Allocate any textures, buffers, volumes &c we want to use with draws/dispatches here
 
 	// Just one draw for now
-	DrawJob job("test.vs", "test.ps");
+	DrawJob job("VertexShader.cso", "PixelShader.cso");
 	job.directToBackbuf = true;
 	jobs.SubmitDraw(job);
 }
@@ -179,9 +179,9 @@ void Pipeline::PushFrame(uint32_t sceneID)
 		if (jobs.typesOfJob[i] == JobArray::DRAW)
 		{
 			DrawJob job = jobs.drawJobsCompact[jobs.jobOffsets[i]];
-			D3DWrapper::SubmitDraw(job.textures, job.textureBindings, job.numTextures,
-								   job.buffers, job.bufferBindings, job.numBuffers,
-								   job.volumes, job.volumeBindings, job.numVolumes, job.vs, job.ps, job.directToBackbuf, job.is2D, sceneData[i].vbuffer, sceneData[i].ibuffer, sceneData[i].numIndices);
+			D3DWrapper::SubmitDraw(job.textures, job.textureBindings, job.bindTexturesFor, job.numTextures,
+								   job.buffers, job.bufferBindings, job.bindBuffersFor, job.numBuffers,
+								   job.volumes, job.volumeBindings, job.bindVolumesFor, job.numVolumes, job.vs, job.ps, job.directToBackbuf, job.is2D, sceneData[sceneID].vbuffer, sceneData[sceneID].ibuffer, sceneData[sceneID].numIndices);
 		}
 		else if (jobs.typesOfJob[i] == JobArray::DISPATCH)
 		{

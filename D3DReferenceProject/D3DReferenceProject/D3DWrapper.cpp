@@ -58,6 +58,8 @@ ComPtr<ID3D11RenderTargetView> backBufView;
 D3DHandle starterDepthBuffer; // Basic rendering should have at least one depth buffer bound, so create this one on startup (obvi users can yeet it and replace with their own, so long as they have a way to bind it
 							  // along with the back-buffer RTV in the last draw)
 
+ComPtr<ID3D11RasterizerState> rsState;
+
 ComPtr<ID3D11InputLayout> ilayout3D;
 ComPtr<ID3D11InputLayout> ilayout2D;
 
@@ -155,6 +157,36 @@ void D3DWrapper::Init(HWND hwnd, uint32_t window_width, uint32_t window_height, 
 
 	// Give users a depth-buffer for initial rendering (so nothing gets clipped unexpectedly/the debug layer doesn't get angry with us)
 	starterDepthBuffer = D3DWrapper::CreateTexture(window_width, window_height, DXGI_FORMAT_D16_UNORM, RESRC_ACCESS_TYPES::GPU_ONLY, RESRC_VIEWS::DEPTH_STENCIL, nullptr, 2 * window_width * window_height);
+
+	// Create & set rasterizer state, to help with debugging & to know exactly what we're doing
+	D3D11_RASTERIZER_DESC rasterDesc = {};
+	rasterDesc.FillMode = D3D11_FILL_SOLID;
+	rasterDesc.CullMode = D3D11_CULL_BACK;
+	rasterDesc.DepthBias = 0;
+	rasterDesc.DepthBiasClamp = 0;
+	rasterDesc.SlopeScaledDepthBias = 0;
+	rasterDesc.DepthClipEnable = TRUE;
+	rasterDesc.ScissorEnable = TRUE;
+	rasterDesc.MultisampleEnable = FALSE;
+	rasterDesc.AntialiasedLineEnable = FALSE;
+	hr = device->CreateRasterizerState(&rasterDesc, &rsState);
+	assert(SUCCEEDED(hr));
+
+	context->RSSetState(rsState.Get());
+
+	// Set the topology expected for our geometry (triangle strip)
+	// This may cause headaches for geometry processing...
+	context->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+	// Define a viewport for rasterization
+	D3D11_VIEWPORT vp = {};
+	vp.TopLeftX = 0;
+	vp.TopLeftY = 0;
+	vp.Width = window_width;
+	vp.Height = window_height;
+	vp.MinDepth = 0.0f;
+	vp.MaxDepth = 0.9f;
+	context->RSSetViewports(1, &vp);
 
 	using_vsync = vsync;
 }
@@ -462,17 +494,18 @@ bool resolved2DInputs = false;
 
 struct ShaderBuilder
 {
-	uint8_t* data = nullptr;
+	char* data = nullptr;
 	uint64_t size = 0;
 	ShaderBuilder(const char* path, SHADER_TYPES type)
 	{
 		// Resolve shader size, allocate temp storage
 		size = std::filesystem::file_size(path);
-		data = (uint8_t*)malloc(size);
+		data = (char*)malloc(size);
 
 		// Open a stream to the shader & copy it into temp storage
-		std::fstream strm(path);
-		strm >> data;
+		std::ifstream strm(path, std::ios::in | std::ios::binary);
+		strm.read(data, size);
+		strm.close();
 
 		// Shader creation
 		if (type == SHADER_TYPES::VS)
@@ -577,23 +610,23 @@ struct BindableViewList
 		{
 			if (std::is_same_v<viewType, ID3D11UnorderedAccessView>)
 			{
-				views[k] = textures[handles[k]].uav.Get();
+				views[k] = reinterpret_cast<viewType*>(textures[handles[k].index].uav.Get());
 			}
 			else if (std::is_same_v<viewType, ID3D11ShaderResourceView>)
 			{
-				views[k] = textures[handles[k]].srv.Get();
+				views[k] = reinterpret_cast<viewType*>(textures[handles[k].index].srv.Get());
 			}
 			else if (std::is_same_v<viewType, ID3D11RenderTargetView>)
 			{
-				views[k] = textures[handles[k]].rtv.Get();
+				views[k] = reinterpret_cast<viewType*>(textures[handles[k].index].rtv.Get());
 			}
 			else if (std::is_same_v<viewType, ID3D11DepthStencilView>)
 			{
-				views[k] = textures[handles[k]].dsv.Get();
+				views[k] = reinterpret_cast<viewType*>(textures[handles[k].index].dsv.Get());
 			}
 			else // if (std::is_same_v<viewType, ID3D11Buffer>)
 			{
-				views[k] = buffers[handles[k]].resrc.Get();
+				views[k] = reinterpret_cast<viewType*>(textures[handles[k].index].resrc.Get());
 			}
 		}
 	}
@@ -620,9 +653,9 @@ void BindResources(D3DHandle* resources, RESRC_VIEWS* resrcBindings, SHADER_TYPE
 
 			// Choose an appropriate binding for the current view type & requested shader stage
 			// (could fill this in now but spent enough time already, and I'd immediately think of smoething else afterward ^_^')
+			SHADER_TYPES stage = bindFor[i];
 			switch (resrcBindings[i])
 			{
-				SHADER_TYPES stage = bindFor[i];
 				case UNORDERED_GPU_WRITES:
 					if (stage == SHADER_TYPES::VS || stage == SHADER_TYPES::PS)
 					{
@@ -631,7 +664,7 @@ void BindResources(D3DHandle* resources, RESRC_VIEWS* resrcBindings, SHADER_TYPE
 					else
 					{
 						BindableViewList<ID3D11UnorderedAccessView> bindings(matchCtr, matchingResources);
-						context->CSSetUnorderedAccessViews(0, matchCtr, bindings.views->GetAddressOf(), nullptr);
+						context->CSSetUnorderedAccessViews(0, matchCtr, bindings.views, nullptr);
 					}
 					break;
 
@@ -754,8 +787,10 @@ void D3DWrapper::SubmitDraw(D3DHandle* draw_textures, RESRC_VIEWS* textureBindin
 		context->OMSetRenderTargets(1, backBufView.GetAddressOf(), textures[starterDepthBuffer.index].dsv.Get());
 	}
 
+	uint32_t vbufOffs = 0;
 	uint32_t vbufStride = is2D ? sizeof(Vertex2D) : sizeof(Vertex3D);
-	context->IASetVertexBuffers(0, 1, buffers[vbuffer.index].resrc.GetAddressOf(), &vbufStride, 0);
+	context->IASetInputLayout(is2D ? ilayout2D.Get() : ilayout3D.Get());
+	context->IASetVertexBuffers(0, 1, buffers[vbuffer.index].resrc.GetAddressOf(), &vbufStride, &vbufOffs);
 	context->IASetIndexBuffer(buffers[ibuffer.index].resrc.Get(), DXGI_FORMAT_R32_UINT, 0);
 
 	context->VSSetShader(vtShaders[VS.index].Get(), nullptr, 0);

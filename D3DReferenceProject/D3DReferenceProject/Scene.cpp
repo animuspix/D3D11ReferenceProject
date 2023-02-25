@@ -4,8 +4,10 @@
 
 const uint32_t maxNumVts = 1048576;
 Vertex3D* modelVts = {};
-//uint32_t* modelNdces = {};
 uint32_t numVts = 0;
+//uint32_t* modelNdces = {};
+
+// Indexation is extremely slow for large models - considering giving that up and keeping file indices instead
 
 Scene::Scene()
 {
