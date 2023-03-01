@@ -835,7 +835,7 @@ void D3DWrapper::SubmitDispatch(D3DHandle* dispatch_textures, RESRC_VIEWS* textu
 void D3DWrapper::PrepareBackbuf()
 {
 	// Clear the back-buffer & depth-buffer
-	const FLOAT debug_red[4] = { 1, 0, 0, 1 };
+	const FLOAT debug_red[4] = { 0.75, 0.25, 0.125, 1 };
 	context->ClearRenderTargetView(backBufView.Get(), debug_red);
 	context->ClearDepthStencilView(textures[starterDepthBuffer.index].dsv.Get(), D3D11_CLEAR_FLAG::D3D11_CLEAR_DEPTH, 1.0f, 0); // Highest possible depth, since our comparison function is LESS and we can't draw things closer than 0 (duh)
 }
