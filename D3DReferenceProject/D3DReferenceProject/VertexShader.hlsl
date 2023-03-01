@@ -9,6 +9,8 @@ Pixel main( Vertex vt )
 
     // Just a random filler transform for now, so we have something to compile
     //vt.pos += vt.normals.wxyz;
-    vt.pos.z = 0.2f;
+    vt.pos.xy *= 0.5f;
+    vt.pos.z += 0.8f;
+    vt.pos.w = 1.0f;
 	return vt;
 }

@@ -54,11 +54,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     Scene scene; // One room and one model in our starter scene
 
     // Load Morgan McGuire's version of the Stanford Bunny
-    scene.AddModel("test_cube.obj");
+    //scene.AddModel("test_cube.obj");
+    scene.AddModel("bunny.obj");
     //scene.AddModel("stage_mesh.obj");
     // ...
 
-    scene.BakeModels(true);
+    scene.BakeModels(false);
 
     // Initialize rendering pipeline
     Pipeline::Init(&scene, 1);

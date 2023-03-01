@@ -172,14 +172,18 @@ void Model::Init(const char* path, Vertex3D* vtOutput, uint32_t outputOffset, ui
 						}
 
 						// Re-duplicate vertices, and encode the results in our vertex output buffer
-						memcpy(&vtOutput[vtsProcessed].pos, &positions[attribNdces[0] * 3], sizeof(float) * 3);
+						const uint32_t posNdx = attribNdces[0] * 3;
+						const uint32_t uvNdx = attribNdces[1] * uvStride;
+						const uint32_t normNdx = attribNdces[2] * 3;
+
+						memcpy(&vtOutput[vtsProcessed].pos, &positions[posNdx], sizeof(float) * 3);
 						vtOutput[vtsProcessed].pos.w = 0;
 
-						memcpy(&vtOutput[vtsProcessed].mat, &texcoords[attribNdces[1] * uvStride], sizeof(float) * 2);
+						memcpy(&vtOutput[vtsProcessed].mat, &texcoords[uvNdx], sizeof(float) * 2);
 						vtOutput[vtsProcessed].mat.z = MATERIAL_TYPES::DIFFUSE;
 						vtOutput[vtsProcessed].mat.w = static_cast<float>(modelCtr);
 
-						memcpy(&vtOutput[vtsProcessed].normals, &normals[attribNdces[2] * 3], sizeof(float) * 3);
+						memcpy(&vtOutput[vtsProcessed].normals, &normals[normNdx], sizeof(float) * 3);
 						vtOutput[vtsProcessed].normals.w = 0;
 
 						vtsProcessed++;

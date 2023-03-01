@@ -59,6 +59,8 @@ D3DHandle starterDepthBuffer; // Basic rendering should have at least one depth 
 							  // along with the back-buffer RTV in the last draw)
 
 ComPtr<ID3D11RasterizerState> rsState;
+ComPtr<ID3D11BlendState> blendState;
+ComPtr<ID3D11DepthStencilState> dsState;
 
 ComPtr<ID3D11InputLayout> ilayout3D;
 ComPtr<ID3D11InputLayout> ilayout2D;
@@ -166,7 +168,7 @@ void D3DWrapper::Init(HWND hwnd, uint32_t window_width, uint32_t window_height, 
 	rasterDesc.DepthBiasClamp = 0;
 	rasterDesc.SlopeScaledDepthBias = 0;
 	rasterDesc.DepthClipEnable = TRUE;
-	rasterDesc.ScissorEnable = TRUE;
+	rasterDesc.ScissorEnable = FALSE;
 	rasterDesc.MultisampleEnable = FALSE;
 	rasterDesc.AntialiasedLineEnable = FALSE;
 	hr = device->CreateRasterizerState(&rasterDesc, &rsState);
@@ -174,9 +176,29 @@ void D3DWrapper::Init(HWND hwnd, uint32_t window_width, uint32_t window_height, 
 
 	context->RSSetState(rsState.Get());
 
+	D3D11_BLEND_DESC blendDesc = {};
+	blendDesc.AlphaToCoverageEnable = FALSE;
+	blendDesc.IndependentBlendEnable = FALSE;
+	blendDesc.RenderTarget->BlendEnable = FALSE;
+	blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+	hr = device->CreateBlendState(&blendDesc, &blendState);
+	assert(SUCCEEDED(hr));
+
+	context->OMSetBlendState(blendState.Get(), NULL, 1);
+
+	D3D11_DEPTH_STENCIL_DESC dsDesc = {};
+	dsDesc.DepthEnable = TRUE;
+	dsDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL; // We don't want/need selective depth writes atm
+	dsDesc.DepthFunc = D3D11_COMPARISON_LESS;
+	dsDesc.StencilEnable = FALSE; // We don't intend to do any stencilling
+	hr = device->CreateDepthStencilState(&dsDesc, &dsState);
+	assert(SUCCEEDED(hr));
+
+	context->OMSetDepthStencilState(dsState.Get(), 0);
+
 	// Set the topology expected for our geometry (triangle strip)
 	// This may cause headaches for geometry processing...
-	context->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+	context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 	// Define a viewport for rasterization
 	D3D11_VIEWPORT vp = {};
@@ -815,7 +837,7 @@ void D3DWrapper::PrepareBackbuf()
 	// Clear the back-buffer & depth-buffer
 	const FLOAT debug_red[4] = { 1, 0, 0, 1 };
 	context->ClearRenderTargetView(backBufView.Get(), debug_red);
-	context->ClearDepthStencilView(textures[starterDepthBuffer.index].dsv.Get(), 0, 0, 0);
+	context->ClearDepthStencilView(textures[starterDepthBuffer.index].dsv.Get(), D3D11_CLEAR_FLAG::D3D11_CLEAR_DEPTH, 1.0f, 0); // Highest possible depth, since our comparison function is LESS and we can't draw things closer than 0 (duh)
 }
 
 void D3DWrapper::Present()
